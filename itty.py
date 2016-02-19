@@ -50,6 +50,7 @@ __license__ = 'BSD'
 
 REQUEST_MAPPINGS = {
     'GET': [],
+    'NOTIFY': [],
     'POST': [],
     'PUT': [],
     'DELETE': [],
@@ -426,6 +427,10 @@ class Request(object):
         return self._environ[name]
 
     @lazyproperty
+    def NOTIFY(self):
+        return self.build_complex_dict()
+
+    @lazyproperty
     def POST(self):
         return self.build_complex_dict()
 
@@ -481,7 +486,7 @@ class Request(object):
         return query_dict
 
     def build_complex_dict(self):
-        """Takes POST/PUT data and rips it apart into a dict."""
+        """Takes NOTIFY/POST/PUT data and rips it apart into a dict."""
         raw_data = cgi.FieldStorage(fp=StringIO.StringIO(self.body), environ=self._environ)
         query_dict = {}
 
@@ -731,6 +736,16 @@ def get(url):
         # Register.
         re_url = re.compile("^%s$" % add_slash(url))
         REQUEST_MAPPINGS['GET'].append((re_url, url, method))
+        return method
+    return wrapped
+
+
+def notify(url):
+    """Registers a method as capable of processing NOTIFY requests."""
+    def wrapped(method):
+        # Register.
+        re_url = re.compile("^%s$" % add_slash(url))
+        REQUEST_MAPPINGS['NOTIFY'].append((re_url, url, method))
         return method
     return wrapped
 
