@@ -2,6 +2,9 @@
 itty.py
 =======
 
+THIS IS A FORK OF ITTY.  I created it to add the NOTIFY http verb.
+
+---  Original content below ---
 The itty-bitty Python web framework.
 
 ``itty.py`` is a little experiment, an attempt at a Sinatra_ influenced
@@ -33,11 +36,11 @@ Example
 ::
 
   from itty import get, run_itty
-  
+
   @get('/')
   def index(request):
       return 'Hello World!'
-  
+
   run_itty()
 
 See ``examples/`` for more usages.
