@@ -2,9 +2,12 @@
 itty.py
 =======
 
-THIS IS A FORK OF ITTY.  I created it to add the NOTIFY http verb.
+THIS IS A FORK OF ITTY.  I created it to add the NOTIFY http verb and removed
+the keyboard exception handling to allow for easier integration into a
+multi-threaded app.
 
 ---  Original content below ---
+
 The itty-bitty Python web framework.
 
 ``itty.py`` is a little experiment, an attempt at a Sinatra_ influenced

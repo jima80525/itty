@@ -1,4 +1,7 @@
 """
+NOTE: this is a fork of the itty tool at https://github.com/toastdriven/itty.
+
+The fork is at: https://github.com/jima80525/itty
 The itty-bitty Python web framework.
 
 Totally ripping off Sintra, the Python way. Very useful for small applications,
@@ -967,7 +970,4 @@ def run_itty(server='wsgiref', host='localhost', port=8080, config=None,
     global COOKIE_SECRET
     COOKIE_SECRET = cookie_secret or base64.b64encode(os.urandom(32))
 
-    try:
-        WSGI_ADAPTERS[server](host, port)
-    except KeyboardInterrupt:
-        print 'Shutting down. Have a nice day!'
+    WSGI_ADAPTERS[server](host, port)
