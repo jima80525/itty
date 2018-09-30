@@ -6,7 +6,7 @@ def simple_post(request):
 
 @post('/test_post')
 def test_post(request):
-    return "'foo' is: %s" % request.POST.get('foo', 'not specified')
+    return "'foo' is: {}".format(request.POST.get('foo', 'not specified'))
 
 @get('/complex_post')
 def complex_post(request):
@@ -15,9 +15,10 @@ def complex_post(request):
 @post('/test_complex_post')
 def test_complex_post(request):
     html = """
-    'foo' is: %s<br>
-    'bar' is: %s
-    """ % (request.POST.get('foo', 'not specified'), request.POST.get('bar', 'not specified'))
+    'foo' is: {}<br>
+    'bar' is: {}
+    """.format(request.POST.get('foo', 'not specified'),
+            request.POST.get('bar', 'not specified'))
     return html
 
 run_itty()

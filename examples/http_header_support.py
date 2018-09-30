@@ -25,6 +25,6 @@ def test_redirect(request):
 
 @get('/unicode')
 def unicode(request):
-    return u'Works with Unîcødé too!'
+    return 'Works with Unîcødé too!'
 
 run_itty()

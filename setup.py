@@ -1,10 +1,6 @@
 #!/usr/bin/env python
+from distutils.core import setup
 import os
-
-try:
-    from setuptools import setup
-except ImportError:
-    from distutils.core import setup
 
 long_desc = ''
 
@@ -16,7 +12,7 @@ except:
 
 setup(
     name='itty',
-    version='0.8.2',
+    version='0.8.1',
     description='The itty-bitty Python web framework.',
     long_description=long_desc,
     author='Daniel Lindsley',

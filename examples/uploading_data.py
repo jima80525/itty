@@ -11,14 +11,14 @@ def test_upload(request):
     if request.POST['myfile'].filename:
         myfilename = request.POST['myfile'].filename
         myfile_contents = request.POST['myfile'].file.read()
-        uploaded_file = open(myfilename, 'w')
+        uploaded_file = open(myfilename, 'wb')
         uploaded_file.write(myfile_contents)
         uploaded_file.close()
     
     html = """
-    'foo' is: %s<br>
-    'bar' is: %s
-    """ % (request.POST.get('foo', 'not specified'), myfilename)
+    'foo' is: {}<br>
+    'bar' is: {}
+    """.format(request.POST.get('foo', 'not specified'), myfilename)
     return html
 
 run_itty()

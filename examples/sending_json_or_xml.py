@@ -1,5 +1,5 @@
-import json # or ``import simplejson as json`` for < Python 2.6
-import xml.etree.ElementTree as etree # or other ElementTree variants for < Python 2.5
+import json
+import xml.etree.ElementTree as etree
 from itty import *
 
 @get('/json')

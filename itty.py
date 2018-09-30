@@ -23,31 +23,16 @@ Example Usage::
 Thanks go out to Matt Croydon & Christian Metts for putting me up to this late
 at night. The joking around has become reality. :)
 """
-import base64
 import cgi
-import datetime
-import hashlib
-import hmac
-import logging
 import mimetypes
-import numbers
 import os
 import re
-import StringIO
+import io
 import sys
-import time
 import traceback
-try:
-    from urlparse import parse_qs
-except ImportError:
-    from cgi import parse_qs
-try:
-    import Cookie
-except ImportError:
-    import http.cookies as Cookie
 
 __author__ = 'Daniel Lindsley'
-__version__ = ('0', '8', '2')
+__version__ = ('1', '0', '0')
 __license__ = 'BSD'
 
 
@@ -146,7 +131,7 @@ class Redirect(RequestError):
 
     def __init__(self, url):
         self.url = url
-        self.args = ["Redirecting to '%s'..." % self.url]
+        self.args = ["Redirecting to '{}'...".format(self.url)]
 
 
 class lazyproperty(object):
@@ -159,236 +144,8 @@ class lazyproperty(object):
             return self
 
         value = self._function(obj)
-        setattr(obj, self._function.func_name, value)
+        setattr(obj, self._function.__name__, value)
         return value
-
-if hasattr(hmac, 'compare_digest'):  # python 3.3
-    _time_independent_equals = hmac.compare_digest
-else:
-    def _time_independent_equals(a, b):
-        if len(a) != len(b):
-            return False
-        result = 0
-        if isinstance(a[0], int):  # python3 byte strings
-            for x, y in zip(a, b):
-                result |= x ^ y
-        else:  # python2
-            for x, y in zip(a, b):
-                result |= ord(x) ^ ord(y)
-        return result == 0
-
-if type('') is not type(b''):
-    def u(s):
-        return s
-    bytes_type = bytes
-    unicode_type = str
-    basestring_type = str
-else:
-    def u(s):
-        return s.decode('unicode_escape')
-    bytes_type = str
-    unicode_type = unicode
-    basestring_type = basestring
-
-_UTF8_TYPES = (bytes_type, type(None))
-
-
-def utf8(value):
-    """Converts a string argument to a byte string.
-    """
-    if isinstance(value, _UTF8_TYPES):
-        return value
-    assert isinstance(value, unicode_type)
-    return value.encode("utf-8")
-
-_TO_UNICODE_TYPES = (unicode_type, type(None))
-
-
-def to_unicode(value):
-    """Converts a string argument to a unicode string.
-    """
-    if isinstance(value, _TO_UNICODE_TYPES):
-        return value
-    assert isinstance(value, bytes_type)
-    return value.decode("utf-8")
-
-_unicode = to_unicode
-
-if str is unicode_type:
-    native_str = to_unicode
-else:
-    native_str = utf8
-
-
-def format_timestamp(ts):
-    """Formats a timestamp in the format used by HTTP.
-    """
-    if isinstance(ts, (tuple, time.struct_time)):
-        pass
-    elif isinstance(ts, datetime.datetime):
-        ts = ts.utctimetuple()
-    elif isinstance(ts, numbers.Real):
-        ts = time.gmtime(ts)
-    else:
-        raise TypeError("unknown timestamp type: %r" % ts)
-    return time.strftime("%a, %d %b %Y %H:%M:%S GMT", ts)
-
-
-def create_signed_value(secret, name, value):
-    timestamp = utf8(str(int(time.time())))
-    value = base64.b64encode(utf8(value))
-    signature = _create_signature(secret, name, value, timestamp)
-    value = b"|".join([value, timestamp, signature])
-    return value
-
-
-def decode_signed_value(secret, name, value, max_age_days=31):
-    if not value:
-        return None
-    parts = utf8(value).split(b"|")
-    if len(parts) != 3:
-        return None
-    signature = _create_signature(secret, name, parts[0], parts[1])
-    if not _time_independent_equals(parts[2], signature):
-        logging.warning("Invalid cookie signature %r", value)
-        return None
-    timestamp = int(parts[1])
-    if timestamp < time.time() - max_age_days * 86400:
-        logging.warning("Expired cookie %r", value)
-        return None
-    if timestamp > time.time() + 31 * 86400:
-        # _cookie_signature does not hash a delimiter between the
-        # parts of the cookie, so an attacker could transfer trailing
-        # digits from the payload to the timestamp without altering the
-        # signature.  For backwards compatibility, sanity-check timestamp
-        # here instead of modifying _cookie_signature.
-        logging.warning("Cookie timestamp in future; possible tampering %r", value)
-        return None
-    if parts[1].startswith(b"0"):
-        logging.warning("Tampered cookie %r", value)
-        return None
-    try:
-        return base64.b64decode(parts[0])
-    except Exception:
-        return None
-
-
-def _create_signature(secret, *parts):
-    hash = hmac.new(utf8(secret), digestmod=hashlib.sha1)
-    for part in parts:
-        hash.update(utf8(part))
-    return utf8(hash.hexdigest())
-
-
-class HTTPHeaders(dict):
-    """A dictionary that maintains Http-Header-Case for all keys.
-    """
-    def __init__(self, *args, **kwargs):
-        dict.__init__(self)
-        self._as_list = {}
-        self._last_key = None
-        if (len(args) == 1 and len(kwargs) == 0 and
-                isinstance(args[0], HTTPHeaders)):
-            for k, v in args[0].get_all():
-                self.add(k, v)
-        else:
-            self.update(*args, **kwargs)
-
-    def add(self, name, value):
-        """Adds a new value for the given key."""
-        norm_name = HTTPHeaders._normalize_name(name)
-        self._last_key = norm_name
-        if norm_name in self:
-            dict.__setitem__(self, norm_name,
-                             native_str(self[norm_name]) + ',' +
-                             native_str(value))
-            self._as_list[norm_name].append(value)
-        else:
-            self[norm_name] = value
-
-    def get_list(self, name):
-        """Returns all values for the given header as a list."""
-        norm_name = HTTPHeaders._normalize_name(name)
-        return self._as_list.get(norm_name, [])
-
-    def get_all(self):
-        """Returns an iterable of all (name, value) pairs.
-
-        If a header has multiple values, multiple pairs will be
-        returned with the same name.
-        """
-        for name, list in self._as_list.items():
-            for value in list:
-                yield (name, value)
-
-    def parse_line(self, line):
-        """Updates the dictionary with a single header line.
-        """
-        if line[0].isspace():
-            # continuation of a multi-line header
-            new_part = ' ' + line.lstrip()
-            self._as_list[self._last_key][-1] += new_part
-            dict.__setitem__(self, self._last_key,
-                             self[self._last_key] + new_part)
-        else:
-            name, value = line.split(":", 1)
-            self.add(name, value.strip())
-
-    @classmethod
-    def parse(cls, headers):
-        """Returns a dictionary from HTTP header text.
-        """
-        h = cls()
-        for line in headers.splitlines():
-            if line:
-                h.parse_line(line)
-        return h
-
-    def __setitem__(self, name, value):
-        norm_name = HTTPHeaders._normalize_name(name)
-        dict.__setitem__(self, norm_name, value)
-        self._as_list[norm_name] = [value]
-
-    def __getitem__(self, name):
-        return dict.__getitem__(self, HTTPHeaders._normalize_name(name))
-
-    def __delitem__(self, name):
-        norm_name = HTTPHeaders._normalize_name(name)
-        dict.__delitem__(self, norm_name)
-        del self._as_list[norm_name]
-
-    def __contains__(self, name):
-        norm_name = HTTPHeaders._normalize_name(name)
-        return dict.__contains__(self, norm_name)
-
-    def get(self, name, default=None):
-        return dict.get(self, HTTPHeaders._normalize_name(name), default)
-
-    def update(self, *args, **kwargs):
-        for k, v in dict(*args, **kwargs).items():
-            self[k] = v
-
-    def copy(self):
-        return HTTPHeaders(self)
-
-    _NORMALIZED_HEADER_RE = re.compile(
-        r'^[A-Z0-9][a-z0-9]*(-[A-Z0-9][a-z0-9]*)*$')
-    _normalized_headers = {}
-
-    @staticmethod
-    def _normalize_name(name):
-        """Converts a name to Http-Header-Case.
-        """
-        try:
-            return HTTPHeaders._normalized_headers[name]
-        except KeyError:
-            if HTTPHeaders._NORMALIZED_HEADER_RE.match(name):
-                normalized = name
-            else:
-                normalized = "-".join(
-                    [w.capitalize() for w in name.split("-")])
-            HTTPHeaders._normalized_headers[name] = normalized
-            return normalized
 
 
 class Request(object):
@@ -405,14 +162,7 @@ class Request(object):
         self.method = self._environ.get('REQUEST_METHOD', 'GET').upper()
         self.query = self._environ.get('QUERY_STRING', '')
         self.content_length = 0
-        self.headers = HTTPHeaders()
-        if self._environ.get("CONTENT_TYPE"):
-            self.headers["Content-Type"] = self._environ["CONTENT_TYPE"]
-        if self._environ.get("CONTENT_LENGTH"):
-            self.headers["Content-Length"] = self._environ["CONTENT_LENGTH"]
-        for key in self._environ:
-            if key.startswith("HTTP_"):
-                self.headers[key[5:].replace("_", "-")] = self._environ[key]
+
         try:
             self.content_length = int(self._environ.get('CONTENT_LENGTH', '0'))
         except ValueError:
@@ -446,36 +196,9 @@ class Request(object):
         """Content of the request."""
         return self._environ['wsgi.input'].read(self.content_length)
 
-    @property
-    def cookies(self):
-        """A dictionary of Cookie.Morsel objects."""
-        if not hasattr(self, "_cookies"):
-            self._cookies = Cookie.SimpleCookie()
-            if "Cookie" in self.headers:
-                try:
-                    self._cookies.load(
-                        native_str(self.headers["Cookie"]))
-                except Exception:
-                    self._cookies = None
-        return self._cookies
-
-    def get_cookie(self, name, default=None):
-        """Gets the value of the cookie with the given name, else default."""
-        if self.cookies is not None and name in self.cookies:
-            return self.cookies[name].value
-        return default
-
-    def get_secure_cookie(self, name, value=None, max_age_days=31):
-        """Returns the given signed cookie if it validates, or None.
-        """
-        if value is None:
-            value = self.get_cookie(name)
-        return decode_signed_value(COOKIE_SECRET, name, value,
-                                   max_age_days=max_age_days)
-
     def build_get_dict(self):
         """Takes GET data and rips it apart into a dict."""
-        raw_query_dict = parse_qs(self.query, keep_blank_values=1)
+        raw_query_dict = cgi.parse_qs(self.query, keep_blank_values=1)
         query_dict = {}
 
         for key, value in raw_query_dict.items():
@@ -490,7 +213,7 @@ class Request(object):
 
     def build_complex_dict(self):
         """Takes NOTIFY/POST/PUT data and rips it apart into a dict."""
-        raw_data = cgi.FieldStorage(fp=StringIO.StringIO(self.body), environ=self._environ)
+        raw_data = cgi.FieldStorage(fp=io.BytesIO(self.body), environ=self._environ)
         query_dict = {}
 
         for field in raw_data:
@@ -508,108 +231,43 @@ class Request(object):
 
 
 class Response(object):
+    headers = []
 
     def __init__(self, output, headers=None, status=200, content_type='text/html'):
         self.output = output
         self.content_type = content_type
         self.status = status
-        self.headers = HTTPHeaders()
+        self.headers = []
 
-        if headers and isinstance(headers, HTTPHeaders):
-            self.headers = headers
         if headers and isinstance(headers, list):
-            for (key, value) in headers:
-                self.headers.add(key, value)
+            self.headers = headers
 
     def add_header(self, key, value):
-        self.headers.add(key, value)
-
-    def set_cookie(self, name, value, domain=None, expires=None, path="/",
-                   expires_days=None, **kwargs):
-        """Sets the given cookie name/value with the given options.
-        """
-        name = native_str(name)
-        value = native_str(value)
-        if re.search(r"[\x00-\x20]", name + value):
-            raise ValueError("Invalid cookie %r: %r" % (name, value))
-        if not hasattr(self, "_new_cookie"):
-            self._new_cookie = Cookie.SimpleCookie()
-        if name in self._new_cookie:
-            del self._new_cookie[name]
-        self._new_cookie[name] = value
-        morsel = self._new_cookie[name]
-        if domain:
-            morsel["domain"] = domain
-        if expires_days is not None and not expires:
-            expires = datetime.datetime.utcnow() + datetime.timedelta(
-                days=expires_days)
-        if expires:
-            morsel["expires"] = format_timestamp(expires)
-        if path:
-            morsel["path"] = path
-        for k, v in kwargs.items():
-            if k == 'max_age':
-                k = 'max-age'
-            morsel[k] = v
-
-    def clear_cookie(self, name, path="/", domain=None):
-        """Deletes the cookie with the given name."""
-        expires = datetime.datetime.utcnow() - datetime.timedelta(days=365)
-        self.set_cookie(name, value="", path=path, expires=expires,
-                        domain=domain)
-
-    def clear_all_cookies(self):
-        """Deletes all the cookies the user sent with this request."""
-        for name in self.request.cookies:
-            self.clear_cookie(name)
-
-    def set_secure_cookie(self, name, value, expires_days=30, **kwargs):
-        """Signs and timestamps a cookie so it cannot be forged."""
-        self.set_cookie(name, self.create_signed_value(name, value),
-                        expires_days=expires_days, **kwargs)
-
-    def create_signed_value(self, name, value):
-        """Signs and timestamps a string so it cannot be forged.
-        """
-        return create_signed_value(COOKIE_SECRET, name, value)
+        self.headers.append((key, value))
 
     def send(self, start_response):
-        status = "%d %s" % (self.status, HTTP_MAPPINGS.get(self.status))
-        headers = ([('Content-Type', "%s; charset=utf-8" % self.content_type)] +
-                  [(k, v) for k, v in self.headers.iteritems()])
-
-        if hasattr(self, "_new_cookie"):
-            for cookie in self._new_cookie.values():
-                headers.append(("Set-Cookie", utf8(cookie.OutputString(None))))
-
+        status = "{} {}".format(self.status, HTTP_MAPPINGS.get(self.status))
+        headers = [
+            ('Content-Type', "{}; charset=utf-8".format(self.content_type))
+        ] + self.headers
         start_response(status, headers)
 
-        if isinstance(self.output, unicode):
-            return self.output.encode('utf-8')
-        else:
-            return self.output
-
-    def convert_to_ascii(self, data):
-        if isinstance(data, unicode):
-            try:
-                return data.encode('us-ascii')
-            except UnicodeError, e:
-                raise
-        else:
-            return str(data)
+        if isinstance(self.output, str):
+            return [self.output.encode('utf-8')]
+        return [self.output]
 
 
 def handle_request(environ, start_response):
     """The main handler. Dispatches to the user's code."""
     try:
         request = Request(environ, start_response)
-    except Exception, e:
+    except Exception as e:
         return handle_error(e)
 
     try:
         (re_url, url, callback), kwargs = find_matching_url(request)
         response = callback(request, **kwargs)
-    except Exception, e:
+    except Exception as e:
         return handle_error(e, request)
 
     if not isinstance(response, Response):
@@ -625,7 +283,7 @@ def handle_error(exception, request=None):
 
     if not getattr(exception, 'hide_traceback', False):
         (e_type, e_value, e_tb) = sys.exc_info()
-        message = "%s occurred on '%s': %s\nTraceback: %s" % (
+        message = "{} occurred on '{}': {}\nTraceback: {}".format(
             exception.__class__,
             request._environ['PATH_INFO'],
             exception,
@@ -647,7 +305,8 @@ def handle_error(exception, request=None):
 def find_matching_url(request):
     """Searches through the methods who've registed themselves with the HTTP decorators."""
     if not request.method in REQUEST_MAPPINGS:
-        raise NotFound("The HTTP request method '%s' is not supported." % request.method)
+        raise NotFound(
+                "The HTTP request method '{}' is not supported.".format(request.method))
 
     for url_set in REQUEST_MAPPINGS[request.method]:
         match = url_set[0].search(request.path)
@@ -737,7 +396,7 @@ def get(url):
     """Registers a method as capable of processing GET requests."""
     def wrapped(method):
         # Register.
-        re_url = re.compile("^%s$" % add_slash(url))
+        re_url = re.compile("^{}$".format(add_slash(url)))
         REQUEST_MAPPINGS['GET'].append((re_url, url, method))
         return method
     return wrapped
@@ -747,7 +406,7 @@ def notify(url):
     """Registers a method as capable of processing NOTIFY requests."""
     def wrapped(method):
         # Register.
-        re_url = re.compile("^%s$" % add_slash(url))
+        re_url = re.compile("^{}$".format(add_slash(url)))
         REQUEST_MAPPINGS['NOTIFY'].append((re_url, url, method))
         return method
     return wrapped
@@ -757,7 +416,7 @@ def post(url):
     """Registers a method as capable of processing POST requests."""
     def wrapped(method):
         # Register.
-        re_url = re.compile("^%s$" % add_slash(url))
+        re_url = re.compile("^{}$".format(add_slash(url)))
         REQUEST_MAPPINGS['POST'].append((re_url, url, method))
         return method
     return wrapped
@@ -767,8 +426,9 @@ def put(url):
     """Registers a method as capable of processing PUT requests."""
     def wrapped(method):
         # Register.
-        re_url = re.compile("^%s$" % add_slash(url))
+        re_url = re.compile("^{}$".format(add_slash(url)))
         REQUEST_MAPPINGS['PUT'].append((re_url, url, method))
+        # XXX wtf is that 'new'?
         new.status = 201
         return method
     return wrapped
@@ -778,7 +438,7 @@ def delete(url):
     """Registers a method as capable of processing DELETE requests."""
     def wrapped(method):
         # Register.
-        re_url = re.compile("^%s$" % add_slash(url))
+        re_url = re.compile("^{}$".format(add_slash(url)))
         REQUEST_MAPPINGS['DELETE'].append((re_url, url, method))
         return method
     return wrapped
@@ -891,7 +551,10 @@ def gunicorn_adapter(host, port):
     if version_info < (0, 9, 0):
         from gunicorn.arbiter import Arbiter
         from gunicorn.config import Config
-        arbiter = Arbiter(Config({'bind': "%s:%d" % (host, int(port)), 'workers': 4}), handle_request)
+        arbiter = Arbiter(Config({
+            'bind': "{}:{}".format(host, int(port)),
+            'workers': 4
+        }), handle_request)
         arbiter.run()
     else:
         from gunicorn.app.base import Application
@@ -934,13 +597,9 @@ WSGI_ADAPTERS = {
 }
 
 
-COOKIE_SECRET = None
-
 # Server
 
-
-def run_itty(server='wsgiref', host='localhost', port=8080, config=None,
-    cookie_secret=None):
+def run_itty(server='wsgiref', host='localhost', port=8080, config=None):
     """
     Runs the itty web server.
 
@@ -951,7 +610,7 @@ def run_itty(server='wsgiref', host='localhost', port=8080, config=None,
     name from WSGI_ADAPTERS to use an alternate WSGI server.
     """
     if not server in WSGI_ADAPTERS:
-        raise RuntimeError("Server '%s' is not a valid server. Please choose a different server." % server)
+        raise RuntimeError("Server '{}' is not a valid server. Please choose a different server.".format(server))
 
     if config is not None:
         # We'll let ImportErrors bubble up.
@@ -962,12 +621,9 @@ def run_itty(server='wsgiref', host='localhost', port=8080, config=None,
 
     # AppEngine seems to echo everything, even though it shouldn't. Accomodate.
     if server != 'appengine':
-        print 'itty starting up (using %s)...' % server
-        print 'Listening on http://%s:%s...' % (host, port)
-        print 'Use Ctrl-C to quit.'
-        print
-
-    global COOKIE_SECRET
-    COOKIE_SECRET = cookie_secret or base64.b64encode(os.urandom(32))
+        print('itty starting up (using {})...'.format(server))
+        print('Listening on http://{}:{}...'.format(host, port))
+        print('Use Ctrl-C to quit.')
+        print()
 
     WSGI_ADAPTERS[server](host, port)

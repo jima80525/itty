@@ -8,6 +8,7 @@ def index(request):
     except KeyError:
         pass
 
-    return "Remote Addr: '%s' & GET name: '%s'" % (request.REMOTE_ADDR, request.GET.get('name', 'Not found'))
+    return "Remote Addr: '{}' & GET name: '{}'".format(
+            request.REMOTE_ADDR, request.GET.get('name', 'Not found'))
 
 run_itty()
